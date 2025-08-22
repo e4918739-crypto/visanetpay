@@ -1,0 +1,185 @@
+sequenceDiagram
+    participant C as Client
+    participant AC as AuthController
+    participant US as UserService
+    participant WS as WalletService
+    participant CS as CryptoService
+    participant HSM as HSMService
+    participant TC as TransferController
+    participant TS as TransferService
+    participant PC as PaymentController
+    participant PRS as PaymentRequestService
+    participant RS as ReceiptService
+    participant NS as NotificationService
+    participant DB as Database
+    participant BM as BlockchainMonitor
+    participant AS as AuditService
+
+    %% User Registration and Wallet Creation Flow
+    Note over C, DB: User Registration with Multi-Currency Wallet Setup
+    C->>AC: POST /api/auth/register
+    AC->>US: createUser(userData)
+    US->>US: generateMemberId() [8 digits unique]
+    US->>DB: CREATE users record
+    DB-->>US: user created
+    US->>WS: createWallet(userId)
+    WS->>DB: CREATE wallet record
+    DB-->>WS: wallet created
+    WS->>WS: initializeBalances(walletId)
+    loop For each asset (USD, EUR, BRL, GBP, BTC, USDT_TRC20)
+        WS->>DB: CREATE balance record with 0 amount
+    end
+    
+    %% Generate Crypto Addresses
+    WS->>CS: generateAddress(userId, 'BTC')
+    CS->>HSM: generateKeyPair('BTC')
+    HSM-->>CS: {address, privateKeyReference}
+    CS->>DB: CREATE crypto_address (BTC)
+    WS->>CS: generateAddress(userId, 'USDT_TRC20')
+    CS->>HSM: generateKeyPair('USDT_TRC20')
+    HSM-->>CS: {address, privateKeyReference}
+    CS->>DB: CREATE crypto_address (USDT_TRC20)
+    
+    AC-->>C: User created with wallets
+
+    %% Internal Transfer Flow
+    Note over C, AS: Internal Transfer Between Members
+    C->>TC: POST /api/transfers/internal {payee_member_id, amount, asset_code}
+    TC->>US: findByMemberId(payee_member_id)
+    US->>DB: SELECT user WHERE member_id = ?
+    DB-->>US: payee_user
+    TC->>TS: validateSufficientBalance(payer_wallet_id, asset_code, amount)
+    TS->>WS: getBalance(payer_wallet_id, asset_code)
+    WS->>DB: SELECT balance WHERE wallet_id AND asset_code
+    DB-->>WS: current_balance
+    TS->>TS: validate amount <= current_balance
+    
+    %% Atomic Transaction Processing
+    TS->>DB: BEGIN TRANSACTION
+    TS->>WS: lockAmount(payer_wallet_id, asset_code, amount)
+    WS->>DB: UPDATE balance SET locked_amount = locked_amount + amount
+    TS->>WS: debitBalance(payer_wallet_id, asset_code, amount)
+    WS->>DB: UPDATE balance SET amount = amount - transfer_amount
+    TS->>WS: creditBalance(payee_wallet_id, asset_code, amount)
+    WS->>DB: UPDATE balance SET amount = amount + transfer_amount
+    TS->>DB: CREATE internal_transfer record
+    TS->>AS: logTransaction(transfer)
+    AS->>DB: CREATE audit_log record
+    TS->>DB: COMMIT TRANSACTION
+    
+    %% Receipt Generation
+    TS->>RS: generatePDF(transfer_id)
+    RS->>DB: SELECT transfer details
+    DB-->>RS: transfer_data
+    RS->>RS: generate PDF with branding
+    RS->>DB: CREATE receipt record
+    
+    %% Notifications
+    TS->>NS: notifyTransferComplete(transfer)
+    NS->>NS: notifyPayer(transfer_sent)
+    NS->>NS: notifyPayee(transfer_received)
+    
+    TC-->>C: Transfer completed successfully
+
+    %% Payment Request (QR Code/Link) Creation Flow
+    Note over C, NS: QR Code and Payment Link Generation
+    C->>PC: POST /api/payment-requests {amount, asset_code, description}
+    PC->>PRS: createPaymentRequest(request_data)
+    PRS->>DB: CREATE payment_request record
+    DB-->>PRS: request_id
+    PRS->>PRS: generatePaymentLink(request_id)
+    PRS->>PRS: generateQRCode(payment_data)
+    PRS->>DB: UPDATE payment_request SET payment_link, qr_code_data
+    PC-->>C: {payment_link, qr_code_image}
+
+    %% Payment Processing via QR/Link
+    Note over C, NS: Payment via QR Code/Link
+    C->>PC: GET /pay/{request_id}
+    PC->>PRS: getPaymentRequest(request_id)
+    PRS->>DB: SELECT payment_request WHERE id = ?
+    DB-->>PRS: request_data
+    PC-->>C: Payment request details
+    C->>PC: POST /api/payment-requests/{request_id}/pay
+    PC->>TS: executeInternalTransfer(payment_data)
+    
+    %% Execute same atomic transfer flow as above
+    Note over TS, AS: Atomic Transfer Processing (same as above)
+    TS->>DB: BEGIN TRANSACTION
+    TS->>WS: Process debit/credit operations
+    TS->>DB: CREATE internal_transfer
+    TS->>AS: logTransaction(transfer)
+    TS->>DB: COMMIT TRANSACTION
+    
+    PC->>PRS: updatePaymentRequestStatus(request_id, 'PAID')
+    PRS->>DB: UPDATE payment_request SET status = 'PAID', paid_at = NOW()
+    PC->>NS: notifyPaymentComplete(request_id)
+    PC-->>C: Payment processed successfully
+
+    %% Crypto Deposit Monitoring Flow
+    Note over BM, NS: Blockchain Monitoring and Deposit Processing
+    loop Continuous Monitoring
+        BM->>BM: monitorBTCAddresses()
+        BM->>BM: monitorUSDTAddresses()
+        BM->>BM: checkForNewTransactions()
+        
+        alt New deposit detected
+            BM->>DB: SELECT crypto_address WHERE address = detected_address
+            DB-->>BM: user_id, asset_code
+            BM->>DB: CREATE crypto_deposit record
+            BM->>BM: waitForConfirmations()
+            
+            alt Sufficient confirmations
+                BM->>WS: creditBalance(wallet_id, asset_code, amount)
+                WS->>DB: UPDATE balance SET amount = amount + deposit_amount
+                BM->>DB: UPDATE crypto_deposit SET status = 'CONFIRMED'
+                BM->>NS: notifyDepositConfirmed(deposit)
+                NS->>NS: sendDepositNotification(user_id)
+            end
+        end
+    end
+
+    %% Admin Operations Flow
+    Note over C, AS: Administrative Operations
+    C->>AC: GET /api/admin/system-status
+    AC->>WS: getTotalBalances()
+    WS->>DB: SELECT SUM(amount) FROM balances GROUP BY asset_code
+    DB-->>WS: total_balances_by_asset
+    AC->>AS: getSystemMetrics()
+    AS->>DB: SELECT COUNT(*) FROM internal_transfers WHERE created_at > ?
+    DB-->>AS: transaction_count
+    AC-->>C: System dashboard data
+
+    %% Audit and Compliance Flow
+    Note over C, AS: Audit Report Generation
+    C->>AC: GET /api/admin/audit-reports?date_range=last_month
+    AC->>AS: generateAuditReport(date_range)
+    AS->>DB: SELECT * FROM internal_transfers WHERE created_at BETWEEN ? AND ?
+    DB-->>AS: transaction_history
+    AS->>DB: SELECT * FROM crypto_deposits WHERE created_at BETWEEN ? AND ?
+    DB-->>AS: deposit_history
+    AS->>AS: validateLedgerIntegrity()
+    AS->>AS: generateComplianceReport()
+    AC-->>C: Detailed audit report
+
+    %% Error Handling and Rollback Flow
+    Note over TS, DB: Error Handling in Atomic Transactions
+    alt Transaction Failure
+        TS->>DB: BEGIN TRANSACTION
+        TS->>WS: debitBalance(payer_wallet_id, asset_code, amount)
+        WS->>DB: UPDATE balance (fails due to insufficient funds)
+        DB-->>WS: ERROR: Constraint violation
+        WS-->>TS: InsufficientFundsError
+        TS->>DB: ROLLBACK TRANSACTION
+        TS->>AS: logFailedTransaction(error_details)
+        TS-->>TC: TransferFailedException
+        TC-->>C: Error: Insufficient funds
+    end
+
+    %% HSM Security Operations
+    Note over CS, HSM: Secure Key Management Operations
+    CS->>HSM: signTransaction(private_key_reference, transaction_data)
+    HSM->>HSM: validateKeyReference()
+    HSM->>HSM: performCryptographicSigning()
+    HSM-->>CS: digital_signature
+    CS->>CS: broadcastTransaction(signed_transaction)
+    CS->>AS: logHSMOperation(operation_details)

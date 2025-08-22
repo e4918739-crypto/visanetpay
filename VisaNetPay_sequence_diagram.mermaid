@@ -1,0 +1,187 @@
+sequenceDiagram
+    participant U as User
+    participant UI as React UI
+    participant MW as MiddlewareChain
+    participant SF as ServiceFactory
+    participant AS as AuthService
+    participant MS as MemberService
+    participant PS as PaymentService
+    participant CS as CryptoService
+    participant NS as NotificationService
+    participant AUS as AuditService
+    participant GS as GatewayService
+    participant MR as MemberRepository
+    participant TR as TransactionRepository
+    participant CR as CryptoRepository
+    participant DB as Supabase Database
+    participant RT as Real-time Channel
+
+    %% User Registration Flow
+    Note over U,DB: User Registration Process
+    U->>UI: Fill registration form
+    UI->>MW: register(userData)
+    MW->>MW: validationMiddleware
+    MW->>MW: authMiddleware (skip for registration)
+    MW->>SF: getMemberService()
+    SF-->>MW: MemberService instance
+    MW->>MS: create(memberData)
+    MS->>MS: validateMemberData(data)
+    MS->>MS: generateMemberId()
+    MS->>MR: create(member)
+    MR->>DB: INSERT INTO members
+    DB-->>MR: member record created
+    MR-->>MS: Member object
+    MS->>SF: getAuthService()
+    SF-->>MS: AuthService instance
+    MS->>AS: createAuth(email, password)
+    AS->>DB: auth.signUp(email, password)
+    DB-->>AS: auth user created
+    AS-->>MS: auth result
+    MS->>SF: getNotificationService()
+    SF-->>MS: NotificationService instance
+    MS->>NS: sendWelcomeEmail(member)
+    NS->>NS: processEmailQueue
+    MS->>SF: getAuditService()
+    SF-->>MS: AuditService instance
+    MS->>AUS: logAction(member_created)
+    AUS->>DB: INSERT INTO audit_log
+    MS-->>MW: ServiceResult.success(member)
+    MW-->>UI: registration success
+    UI-->>U: show success + member_id
+
+    %% Authentication Flow
+    Note over U,DB: User Login Process
+    U->>UI: Enter credentials
+    UI->>MW: login(credentials)
+    MW->>MW: validationMiddleware
+    MW->>SF: getAuthService()
+    SF-->>MW: AuthService instance
+    MW->>AS: login(credentials)
+    AS->>DB: auth.signInWithPassword()
+    DB-->>AS: session + user
+    AS->>AS: validateSession()
+    AS->>MR: findById(user.id)
+    MR->>DB: SELECT FROM members
+    DB-->>MR: member profile
+    MR-->>AS: Member object
+    AS->>AUS: logAction(login_success)
+    AS-->>MW: AuthResult.success
+    MW-->>UI: login success + profile
+    UI-->>U: redirect to dashboard
+
+    %% Payment Transfer Flow
+    Note over U,DB: Internal Transfer Process
+    U->>UI: Enter transfer details
+    UI->>MW: transfer(transferRequest)
+    MW->>MW: authMiddleware
+    MW->>MW: validationMiddleware
+    MW->>SF: getPaymentService()
+    SF-->>MW: PaymentService instance
+    MW->>PS: transfer(request)
+    PS->>PS: validateTransfer(data)
+    PS->>MS: getByMemberId(fromId)
+    MS->>MR: findByMemberId(fromId)
+    MR->>DB: SELECT FROM members
+    DB-->>MR: sender member
+    MR-->>MS: Member object
+    MS-->>PS: sender validated
+    PS->>MS: getByMemberId(toId)
+    MS->>MR: findByMemberId(toId)
+    MR->>DB: SELECT FROM members
+    DB-->>MR: receiver member
+    MR-->>MS: Member object
+    MS-->>PS: receiver validated
+    PS->>PS: calculateFees(amount, currency)
+    PS->>DB: BEGIN transaction
+    PS->>TR: create(transaction)
+    TR->>DB: INSERT INTO transactions
+    DB-->>TR: transaction created
+    PS->>DB: UPDATE sender balance
+    PS->>DB: UPDATE receiver balance
+    PS->>DB: COMMIT transaction
+    PS->>NS: sendTransferNotification(sender)
+    PS->>NS: sendTransferNotification(receiver)
+    NS->>RT: broadcast notification
+    RT-->>UI: real-time update
+    PS->>AUS: logAction(transfer_completed)
+    PS-->>MW: ServiceResult.success(transaction)
+    MW-->>UI: transfer success
+    UI-->>U: show confirmation
+
+    %% Crypto Wallet Creation Flow
+    Note over U,DB: Crypto Wallet Setup
+    U->>UI: Request crypto wallet
+    UI->>MW: createWallet(memberId, currency)
+    MW->>MW: authMiddleware
+    MW->>SF: getCryptoService()
+    SF-->>MW: CryptoService instance
+    MW->>CS: createWallet(memberId, currency)
+    CS->>GS: generateAddress(currency)
+    GS->>GS: call external crypto API
+    GS-->>CS: unique address
+    CS->>CR: create(wallet)
+    CR->>DB: INSERT INTO crypto_wallets
+    DB-->>CR: wallet created
+    CR-->>CS: CryptoWallet object
+    CS->>CS: generateQRCode(address)
+    CS->>NS: sendWalletCreatedNotification(member)
+    CS->>AUS: logAction(crypto_wallet_created)
+    CS-->>MW: ServiceResult.success(wallet)
+    MW-->>UI: wallet with QR code
+    UI-->>U: display wallet details
+
+    %% Real-time Notification Flow
+    Note over DB,U: Real-time Updates
+    DB->>RT: database change trigger
+    RT->>NS: processChange(changeData)
+    NS->>NS: determineAffectedUsers()
+    NS->>NS: formatNotification()
+    NS->>RT: broadcast(notification)
+    RT->>UI: real-time message
+    UI->>UI: updateUIState()
+    UI-->>U: show notification toast
+
+    %% External Payment Flow
+    Note over U,DB: External Payment Processing
+    U->>UI: Initiate external payment
+    UI->>MW: processExternalPayment(request)
+    MW->>MW: authMiddleware
+    MW->>MW: validationMiddleware
+    MW->>SF: getGatewayService()
+    SF-->>MW: GatewayService instance
+    MW->>GS: processExternalPayment(request)
+    GS->>GS: selectPaymentProvider(method)
+    GS->>GS: callExternalAPI(paymentData)
+    GS-->>GS: external payment result
+    GS->>PS: recordPayment(paymentResult)
+    PS->>TR: create(externalTransaction)
+    TR->>DB: INSERT INTO transactions
+    PS->>AUS: logAction(external_payment)
+    GS-->>MW: ServiceResult.success(payment)
+    MW-->>UI: payment success
+    UI-->>U: show confirmation
+
+    %% Audit Trail Flow
+    Note over AUS,DB: System Monitoring
+    AUS->>AUS: collectPerformanceMetrics()
+    AUS->>DB: INSERT INTO audit_log
+    AUS->>AUS: analyzeSecurityEvents()
+    AUS->>NS: alertOnSuspiciousActivity()
+    AUS->>AUS: generateComplianceReports()
+
+    %% Error Handling Flow
+    Note over MW,UI: Error Management
+    MW->>MW: errorMiddleware
+    MW->>MW: ErrorHandler.handle(error)
+    MW->>AUS: logError(error, context)
+    MW-->>UI: ServiceResult.failure(message)
+    UI->>UI: displayErrorToUser()
+    UI-->>U: show error message
+
+    %% Session Management Flow
+    Note over AS,DB: Token Refresh
+    AS->>AS: checkTokenExpiry()
+    AS->>DB: auth.refreshSession()
+    DB-->>AS: new session tokens
+    AS->>AS: updateLocalStorage()
+    AS->>AUS: logAction(token_refreshed)

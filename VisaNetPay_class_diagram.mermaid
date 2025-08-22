@@ -1,0 +1,382 @@
+classDiagram
+    %% Core Domain Models
+    class Member {
+        +string id
+        +string member_id
+        +string full_name
+        +string email
+        +UserRole role
+        +UserStatus status
+        +Date created_at
+        +Date last_login
+        +isActive() boolean
+        +hasPermission(permission: string) boolean
+        +generateApiKey() string
+    }
+
+    class Transaction {
+        +string id
+        +string from_member_id
+        +string to_member_id
+        +number amount
+        +string currency
+        +TransactionType type
+        +TransactionStatus status
+        +Date created_at
+        +number fees
+        +string description
+        +calculateTotalAmount() number
+        +isValid() boolean
+        +canBeReversed() boolean
+    }
+
+    class CryptoWallet {
+        +string id
+        +string member_id
+        +CryptoCurrency currency
+        +string address
+        +number balance
+        +Date created_at
+        +generateQRCode() string
+        +formatBalance() string
+        +isValidAddress() boolean
+    }
+
+    class Payment {
+        +string id
+        +string member_id
+        +number amount
+        +string currency
+        +PaymentMethod method
+        +PaymentStatus status
+        +Date created_at
+        +string external_id
+        +processPayment() Promise~ServiceResult~
+    }
+
+    %% Service Interfaces
+    class IAuthService {
+        <<interface>>
+        +login(credentials: LoginCredentials) Promise~AuthResult~
+        +logout() Promise~void~
+        +refreshToken() Promise~string~
+        +getCurrentUser() Promise~User~
+        +hasPermission(permission: string) boolean
+        +validateSession() Promise~boolean~
+    }
+
+    class IMemberService {
+        <<interface>>
+        +create(member: CreateMemberRequest) Promise~ServiceResult~
+        +update(id: string, data: UpdateMemberRequest) Promise~ServiceResult~
+        +delete(id: string) Promise~ServiceResult~
+        +getById(id: string) Promise~ServiceResult~
+        +getByMemberId(memberId: string) Promise~ServiceResult~
+        +generateMemberId() string
+        +validateMemberData(data: any) ValidationResult
+    }
+
+    class IPaymentService {
+        <<interface>>
+        +transfer(request: TransferRequest) Promise~ServiceResult~
+        +getTransactionHistory(memberId: string) Promise~ServiceResult~
+        +validateTransfer(data: TransferRequest) ValidationResult
+        +calculateFees(amount: number, currency: string) FeeCalculation
+        +processPayment(payment: PaymentRequest) Promise~ServiceResult~
+    }
+
+    class ICryptoService {
+        <<interface>>
+        +createWallet(memberId: string, currency: CryptoCurrency) Promise~ServiceResult~
+        +getWalletBalance(walletId: string) Promise~ServiceResult~
+        +generateAddress(walletId: string) Promise~ServiceResult~
+        +getExchangeRate(from: string, to: string) Promise~ServiceResult~
+        +processDeposit(deposit: CryptoDeposit) Promise~ServiceResult~
+    }
+
+    class INotificationService {
+        <<interface>>
+        +sendRealTime(userId: string, notification: RealtimeNotification) Promise~void~
+        +sendEmail(email: EmailNotification) Promise~ServiceResult~
+        +sendSMS(sms: SMSNotification) Promise~ServiceResult~
+        +subscribe(userId: string, channel: string) Promise~void~
+        +unsubscribe(userId: string, channel: string) Promise~void~
+    }
+
+    class IAuditService {
+        <<interface>>
+        +logAction(action: AuditAction) Promise~void~
+        +logSecurityEvent(event: SecurityEvent) Promise~void~
+        +getAuditTrail(filters: AuditFilters) Promise~ServiceResult~
+        +trackPerformance(metric: PerformanceMetric) Promise~void~
+    }
+
+    class IGatewayService {
+        <<interface>>
+        +processExternalPayment(request: ExternalPaymentRequest) Promise~ServiceResult~
+        +validateWebhook(payload: any, signature: string) boolean
+        +handleWebhook(payload: WebhookPayload) Promise~void~
+        +getPaymentMethods() Promise~ServiceResult~
+    }
+
+    %% Service Implementations
+    class AuthService {
+        -supabaseClient: SupabaseClient
+        -currentUser: User
+        +login(credentials: LoginCredentials) Promise~AuthResult~
+        +logout() Promise~void~
+        +refreshToken() Promise~string~
+        +getCurrentUser() Promise~User~
+        +hasPermission(permission: string) boolean
+        +validateSession() Promise~boolean~
+    }
+
+    class MemberService {
+        -memberRepository: IMemberRepository
+        -auditService: IAuditService
+        +create(member: CreateMemberRequest) Promise~ServiceResult~
+        +update(id: string, data: UpdateMemberRequest) Promise~ServiceResult~
+        +delete(id: string) Promise~ServiceResult~
+        +getById(id: string) Promise~ServiceResult~
+        +getByMemberId(memberId: string) Promise~ServiceResult~
+        +generateMemberId() string
+        +validateMemberData(data: any) ValidationResult
+    }
+
+    class PaymentService {
+        -transactionRepository: ITransactionRepository
+        -memberService: IMemberService
+        -auditService: IAuditService
+        -notificationService: INotificationService
+        +transfer(request: TransferRequest) Promise~ServiceResult~
+        +getTransactionHistory(memberId: string) Promise~ServiceResult~
+        +validateTransfer(data: TransferRequest) ValidationResult
+        +calculateFees(amount: number, currency: string) FeeCalculation
+        +processPayment(payment: PaymentRequest) Promise~ServiceResult~
+    }
+
+    class CryptoService {
+        -cryptoRepository: ICryptoWalletRepository
+        -gatewayService: IGatewayService
+        -memberService: IMemberService
+        +createWallet(memberId: string, currency: CryptoCurrency) Promise~ServiceResult~
+        +getWalletBalance(walletId: string) Promise~ServiceResult~
+        +generateAddress(walletId: string) Promise~ServiceResult~
+        +getExchangeRate(from: string, to: string) Promise~ServiceResult~
+        +processDeposit(deposit: CryptoDeposit) Promise~ServiceResult~
+    }
+
+    class NotificationService {
+        -supabaseClient: SupabaseClient
+        -emailProvider: EmailProvider
+        -smsProvider: SMSProvider
+        +sendRealTime(userId: string, notification: RealtimeNotification) Promise~void~
+        +sendEmail(email: EmailNotification) Promise~ServiceResult~
+        +sendSMS(sms: SMSNotification) Promise~ServiceResult~
+        +subscribe(userId: string, channel: string) Promise~void~
+        +unsubscribe(userId: string, channel: string) Promise~void~
+    }
+
+    class AuditService {
+        -auditRepository: IAuditRepository
+        -performanceTracker: PerformanceTracker
+        +logAction(action: AuditAction) Promise~void~
+        +logSecurityEvent(event: SecurityEvent) Promise~void~
+        +getAuditTrail(filters: AuditFilters) Promise~ServiceResult~
+        +trackPerformance(metric: PerformanceMetric) Promise~void~
+    }
+
+    class GatewayService {
+        -externalPaymentProviders: PaymentProvider[]
+        -webhookHandlers: WebhookHandler[]
+        +processExternalPayment(request: ExternalPaymentRequest) Promise~ServiceResult~
+        +validateWebhook(payload: any, signature: string) boolean
+        +handleWebhook(payload: WebhookPayload) Promise~void~
+        +getPaymentMethods() Promise~ServiceResult~
+    }
+
+    %% Repository Interfaces
+    class IMemberRepository {
+        <<interface>>
+        +create(member: CreateMemberRequest) Promise~Member~
+        +update(id: string, data: Partial~Member~) Promise~Member~
+        +delete(id: string) Promise~void~
+        +findById(id: string) Promise~Member~
+        +findByMemberId(memberId: string) Promise~Member~
+        +findByEmail(email: string) Promise~Member~
+        +findAll(filters: MemberFilters) Promise~Member[]~
+    }
+
+    class ITransactionRepository {
+        <<interface>>
+        +create(transaction: CreateTransactionRequest) Promise~Transaction~
+        +findById(id: string) Promise~Transaction~
+        +findByMemberId(memberId: string, filters: TransactionFilters) Promise~Transaction[]~
+        +updateStatus(id: string, status: TransactionStatus) Promise~void~
+    }
+
+    class ICryptoWalletRepository {
+        <<interface>>
+        +create(wallet: CreateWalletRequest) Promise~CryptoWallet~
+        +findByMemberId(memberId: string) Promise~CryptoWallet[]~
+        +findByAddress(address: string) Promise~CryptoWallet~
+        +updateBalance(id: string, balance: number) Promise~void~
+    }
+
+    %% Repository Implementations
+    class SupabaseMemberRepository {
+        -supabaseClient: SupabaseClient
+        +create(member: CreateMemberRequest) Promise~Member~
+        +update(id: string, data: Partial~Member~) Promise~Member~
+        +delete(id: string) Promise~void~
+        +findById(id: string) Promise~Member~
+        +findByMemberId(memberId: string) Promise~Member~
+        +findByEmail(email: string) Promise~Member~
+        +findAll(filters: MemberFilters) Promise~Member[]~
+    }
+
+    class SupabaseTransactionRepository {
+        -supabaseClient: SupabaseClient
+        +create(transaction: CreateTransactionRequest) Promise~Transaction~
+        +findById(id: string) Promise~Transaction~
+        +findByMemberId(memberId: string, filters: TransactionFilters) Promise~Transaction[]~
+        +updateStatus(id: string, status: TransactionStatus) Promise~void~
+    }
+
+    class SupabaseCryptoWalletRepository {
+        -supabaseClient: SupabaseClient
+        +create(wallet: CreateWalletRequest) Promise~CryptoWallet~
+        +findByMemberId(memberId: string) Promise~CryptoWallet[]~
+        +findByAddress(address: string) Promise~CryptoWallet~
+        +updateBalance(id: string, balance: number) Promise~void~
+    }
+
+    %% Utility Classes
+    class ServiceResult~T~ {
+        +boolean success
+        +T data
+        +string error
+        +ValidationError[] validationErrors
+        +success~T~(data: T) ServiceResult~T~
+        +failure~T~(error: string) ServiceResult~T~
+        +validationFailure~T~(errors: ValidationError[]) ServiceResult~T~
+    }
+
+    class ServiceFactory {
+        -Map~string, any~ instances
+        +getAuthService() IAuthService
+        +getMemberService() IMemberService
+        +getPaymentService() IPaymentService
+        +getCryptoService() ICryptoService
+        +getNotificationService() INotificationService
+        +getAuditService() IAuditService
+        +getGatewayService() IGatewayService
+    }
+
+    class MiddlewareChain {
+        -Middleware[] middlewares
+        +use(middleware: Middleware) MiddlewareChain
+        +execute(context: RequestContext) Promise~any~
+    }
+
+    class ErrorHandler {
+        +handle(error: Error, context: RequestContext) ServiceResult~any~
+    }
+
+    class Config {
+        +supabase ConfigSection
+        +crypto ConfigSection
+        +features FeatureFlags
+    }
+
+    %% Enums
+    class UserRole {
+        <<enumeration>>
+        ADMIN
+        MEMBER
+        VIEWER
+    }
+
+    class UserStatus {
+        <<enumeration>>
+        ACTIVE
+        SUSPENDED
+        BLOCKED
+        PENDING
+    }
+
+    class TransactionType {
+        <<enumeration>>
+        TRANSFER
+        DEPOSIT
+        WITHDRAWAL
+        PAYMENT
+        CRYPTO_EXCHANGE
+    }
+
+    class TransactionStatus {
+        <<enumeration>>
+        PENDING
+        COMPLETED
+        FAILED
+        CANCELLED
+        REVERSED
+    }
+
+    class CryptoCurrency {
+        <<enumeration>>
+        BTC
+        ETH
+        USDT
+        USDC
+    }
+
+    class PaymentStatus {
+        <<enumeration>>
+        PENDING
+        PROCESSING
+        COMPLETED
+        FAILED
+        CANCELLED
+    }
+
+    %% Relationships
+    Member ||--o{ Transaction : "has many"
+    Member ||--o{ CryptoWallet : "owns"
+    Member ||--o{ Payment : "makes"
+    
+    IAuthService <|.. AuthService
+    IMemberService <|.. MemberService
+    IPaymentService <|.. PaymentService
+    ICryptoService <|.. CryptoService
+    INotificationService <|.. NotificationService
+    IAuditService <|.. AuditService
+    IGatewayService <|.. GatewayService
+    
+    IMemberRepository <|.. SupabaseMemberRepository
+    ITransactionRepository <|.. SupabaseTransactionRepository
+    ICryptoWalletRepository <|.. SupabaseCryptoWalletRepository
+    
+    MemberService --> IMemberRepository
+    PaymentService --> ITransactionRepository
+    PaymentService --> IMemberService
+    PaymentService --> IAuditService
+    PaymentService --> INotificationService
+    CryptoService --> ICryptoWalletRepository
+    CryptoService --> IGatewayService
+    CryptoService --> IMemberService
+    
+    ServiceFactory --> IAuthService
+    ServiceFactory --> IMemberService
+    ServiceFactory --> IPaymentService
+    ServiceFactory --> ICryptoService
+    ServiceFactory --> INotificationService
+    ServiceFactory --> IAuditService
+    ServiceFactory --> IGatewayService
+    
+    Member --> UserRole
+    Member --> UserStatus
+    Transaction --> TransactionType
+    Transaction --> TransactionStatus
+    CryptoWallet --> CryptoCurrency
+    Payment --> PaymentStatus

@@ -1,0 +1,248 @@
+classDiagram
+    class User {
+        +UUID id
+        +String member_id [8 digits, unique]
+        +String email
+        +String name
+        +String role [admin|manager|operator|user]
+        +JSONB permissions
+        +String status [active|inactive|suspended]
+        +Timestamp created_at
+        +Timestamp updated_at
+        +generateMemberId() String
+        +validateRole() Boolean
+        +updatePermissions(permissions) void
+    }
+
+    class Wallet {
+        +UUID id
+        +UUID user_id
+        +Timestamp created_at
+        +getBalances() Balance[]
+        +getTotalValueUSD() Decimal
+        +hasAsset(assetCode) Boolean
+    }
+
+    class Balance {
+        +UUID id
+        +UUID wallet_id
+        +String asset_code [USD|EUR|BRL|GBP|BTC|USDT_TRC20]
+        +Decimal amount [18,8 precision]
+        +Decimal locked_amount
+        +Timestamp updated_at
+        +lockAmount(amount) void
+        +unlockAmount(amount) void
+        +creditAmount(amount) void
+        +debitAmount(amount) void
+        +hasSufficientBalance(amount) Boolean
+    }
+
+    class CryptoAddress {
+        +UUID id
+        +UUID user_id
+        +String asset_code [BTC|USDT_TRC20]
+        +String address [public address]
+        +String private_key_reference [HSM reference]
+        +Boolean is_active
+        +Timestamp created_at
+        +generateAddress() String
+        +signTransaction(data) String
+        +validateAddress() Boolean
+    }
+
+    class InternalTransfer {
+        +UUID id
+        +UUID transaction_uuid
+        +UUID payer_wallet_id
+        +UUID payee_wallet_id
+        +String asset_code
+        +Decimal amount
+        +String status [COMPLETED|FAILED]
+        +UUID related_payment_request_id
+        +String description
+        +JSONB metadata
+        +Timestamp created_at
+        +executeTransfer() void
+        +rollbackTransfer() void
+        +generateReceipt() Receipt
+    }
+
+    class PaymentRequest {
+        +UUID id
+        +UUID payee_user_id
+        +Decimal amount
+        +String asset_code
+        +String description
+        +String status [PENDING|PAID|EXPIRED|CANCELLED]
+        +String payment_link
+        +String qr_code_data [Base64]
+        +Timestamp expires_at
+        +Timestamp paid_at
+        +UUID paid_by_user_id
+        +Timestamp created_at
+        +generateQRCode() String
+        +generatePaymentLink() String
+        +processPayment(payerUserId) InternalTransfer
+        +expireRequest() void
+    }
+
+    class CryptoDeposit {
+        +UUID id
+        +UUID user_id
+        +UUID crypto_address_id
+        +String asset_code
+        +Decimal amount
+        +String transaction_hash
+        +BigInt block_height
+        +Integer confirmations
+        +String status [PENDING|CONFIRMED|FAILED]
+        +Timestamp processed_at
+        +Timestamp created_at
+        +updateConfirmations(count) void
+        +processDeposit() void
+        +creditToWallet() void
+    }
+
+    class Receipt {
+        +UUID id
+        +UUID transfer_id
+        +String pdf_path
+        +BYTEA pdf_data
+        +Timestamp generated_at
+        +generatePDF(template) void
+        +sendByEmail(email) void
+        +downloadPDF() Buffer
+    }
+
+    class UserService {
+        +createUser(userData) User
+        +generateMemberId() String
+        +findByMemberId(memberId) User
+        +updatePermissions(userId, permissions) void
+        +suspendUser(userId) void
+        +validateMemberIdFormat(memberId) Boolean
+    }
+
+    class WalletService {
+        +createWallet(userId) Wallet
+        +initializeBalances(walletId) Balance[]
+        +getBalance(walletId, assetCode) Decimal
+        +lockAmount(walletId, assetCode, amount) void
+        +unlockAmount(walletId, assetCode, amount) void
+        +creditBalance(walletId, assetCode, amount) void
+        +debitBalance(walletId, assetCode, amount) void
+    }
+
+    class CryptoService {
+        +generateAddress(userId, assetCode) CryptoAddress
+        +storePrivateKeyReference(address, keyRef) void
+        +signTransaction(keyRef, txData) String
+        +monitorDeposits() void
+        +processDepositConfirmations() void
+        +validateCryptoAddress(address, assetCode) Boolean
+    }
+
+    class TransferService {
+        +executeInternalTransfer(request) InternalTransfer
+        +validateSufficientBalance(walletId, assetCode, amount) Boolean
+        +processAtomicTransfer(payerWalletId, payeeWalletId, assetCode, amount) InternalTransfer
+        +rollbackFailedTransfer(transferId) void
+        +validateTransferRequest(request) Boolean
+    }
+
+    class PaymentRequestService {
+        +createPaymentRequest(request) PaymentRequest
+        +generateQRCode(paymentData) String
+        +generatePaymentLink(requestId) String
+        +processPayment(requestId, payerUserId) InternalTransfer
+        +expireOutdatedRequests() void
+        +cancelPaymentRequest(requestId) void
+    }
+
+    class ReceiptService {
+        +generatePDF(transferId) Receipt
+        +customizePDFTemplate(template) void
+        +sendReceiptByEmail(receiptId, email) void
+        +downloadReceipt(receiptId) Buffer
+        +generateReceiptData(transfer) Object
+    }
+
+    class HSMService {
+        +generateKeyPair(assetCode) Object
+        +signWithHSM(keyReference, data) String
+        +validateSignature(publicKey, signature, data) Boolean
+        +rotateKeys(oldKeyRef) String
+        +backupKeyReferences() void
+    }
+
+    class AuditService {
+        +logTransaction(transaction) void
+        +generateAuditReport(dateRange) AuditReport
+        +validateLedgerIntegrity() Boolean
+        +detectAnomalies() AnomalyReport
+        +exportComplianceReport() ComplianceReport
+    }
+
+    class BlockchainMonitor {
+        +monitorBTCAddresses() void
+        +monitorUSDTAddresses() void
+        +processConfirmations() void
+        +handleNewDeposit(deposit) void
+        +validateTransactionHash(hash) Boolean
+    }
+
+    class NotificationService {
+        +notifyTransferComplete(transfer) void
+        +notifyDepositReceived(deposit) void
+        +notifyPaymentRequestPaid(request) void
+        +sendReceiptEmail(receiptId, email) void
+        +sendSecurityAlert(alert) void
+    }
+
+    %% Relationships
+    User ||--|| Wallet : owns
+    User ||--o{ CryptoAddress : has
+    User ||--o{ PaymentRequest : creates
+    User ||--o{ CryptoDeposit : receives
+    
+    Wallet ||--o{ Balance : contains
+    Wallet ||--o{ InternalTransfer : payer
+    Wallet ||--o{ InternalTransfer : payee
+    
+    CryptoAddress ||--o{ CryptoDeposit : receives_to
+    
+    InternalTransfer ||--o| PaymentRequest : fulfills
+    InternalTransfer ||--|| Receipt : generates
+    
+    PaymentRequest ||--o| InternalTransfer : creates
+    
+    %% Service Dependencies
+    UserService ..> User : manages
+    UserService ..> WalletService : creates_wallet
+    
+    WalletService ..> Wallet : manages
+    WalletService ..> Balance : manages
+    
+    CryptoService ..> CryptoAddress : manages
+    CryptoService ..> HSMService : uses
+    CryptoService ..> CryptoDeposit : processes
+    
+    TransferService ..> InternalTransfer : manages
+    TransferService ..> WalletService : uses
+    TransferService ..> AuditService : logs_to
+    
+    PaymentRequestService ..> PaymentRequest : manages
+    PaymentRequestService ..> TransferService : executes_payment
+    
+    ReceiptService ..> Receipt : generates
+    ReceiptService ..> InternalTransfer : reads_from
+    
+    BlockchainMonitor ..> CryptoDeposit : creates
+    BlockchainMonitor ..> CryptoService : notifies
+    
+    AuditService ..> InternalTransfer : audits
+    AuditService ..> User : tracks
+    
+    NotificationService ..> User : notifies
+    NotificationService ..> InternalTransfer : monitors
+    NotificationService ..> PaymentRequest : monitors
